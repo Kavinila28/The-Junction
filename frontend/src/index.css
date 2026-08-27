@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-junction-bg text-slate-200 font-display antialiased;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply rounded-xl border border-junction-line bg-junction-panel/80 p-5 shadow-lg shadow-black/20;
+  }
+  .panel-title {
+    @apply text-xs font-semibold uppercase tracking-widest text-junction-muted;
+  }
+  .stat-value {
+    @apply text-3xl font-bold text-white;
+  }
+  .kpi-card {
+    @apply panel flex flex-col justify-between gap-3;
+  }
+  .placeholder-dash {
+    @apply text-2xl font-semibold text-junction-muted/50;
+  }
+}
