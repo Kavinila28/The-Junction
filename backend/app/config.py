@@ -5,7 +5,6 @@ Settings are loaded from environment variables and a local .env file
 """
 
 from pathlib import Path
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Project root: backend/
@@ -31,10 +30,7 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8000
 
-    cors_origins: list[str] = [
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ]
+    cors_origins: list[str] = ["*"]
 
     upload_dir: Path = UPLOAD_DIR
     results_dir: Path = RESULTS_DIR

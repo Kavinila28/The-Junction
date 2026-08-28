@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { getHealth } from "../api/client.js";
 
 export default function HealthBadge() {
   const [status, setStatus] = useState("checking");
@@ -7,8 +8,7 @@ export default function HealthBadge() {
     let alive = true;
     const check = async () => {
       try {
-        const res = await fetch("/api/health");
-        const data = await res.json();
+        const data = await getHealth();
         if (alive) setStatus(data.status === "ok" ? "online" : "error");
       } catch {
         if (alive) setStatus("offline");
