@@ -67,7 +67,14 @@ CREATE INDEX IF NOT EXISTS idx_events_analysis ON events(analysis_id);
 
 
 def _connect() -> sqlite3.Connection:
+    settings.db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(settings.db_path), timeout=30.0)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        conn.execute("PRAGMA busy_timeout=30000;")
+    except Exception:
+        pass
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -146,10 +153,19 @@ def complete_analysis(analysis_id: str, summary: dict, annotated_path, events: l
             conn.execute(
                 """
                 UPDATE analyses
-                  SET status='completed', stage='completed', progress=100,
-                      completed_at=?, annotated_path=?,
-                      duration_s=?, frame_count=?, fps=?, width=?, height=?,
-                      risk_score=?, risk_category=?, summary=?
+                SET status = 'completed',
+                    stage = 'completed',
+                    progress = 100,
+                    completed_at = ?,
+                    annotated_path = ?,
+                    duration_s = ?,
+                    frame_count = ?,
+                    fps = ?,
+                    width = ?,
+                    height = ?,
+                    risk_score = ?,
+                    risk_category = ?,
+                    summary = ?
                 WHERE id = ?
                 """,
                 (
@@ -166,99 +182,119 @@ def complete_analysis(analysis_id: str, summary: dict, annotated_path, events: l
                     analysis_id,
                 ),
             )
-            conn.executemany(
-                """
-                INSERT INTO events (analysis_id, event_type, type_label,
-                    frame_start, frame_end, timestamp_s, duration_s, severity,
-                    severity_label, actor_a_class, actor_a_id, actor_b_class,
-                    actor_b_id, min_gap_px, min_ttc_s, max_speed_px_s,
-                    headline, explanation, factors)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                [
+
+            for ev in events:
+                conn.execute(
+                    """
+                    INSERT INTO events (
+                        analysis_id, event_type, type_label, frame_start, frame_end,
+                        timestamp_s, duration_s, severity, severity_label,
+                        actor_a_class, actor_a_id, actor_b_class, actor_b_id,
+                        min_gap_px, min_ttc_s, max_speed_px_s, headline, explanation, factors
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
                     (
                         analysis_id,
-                        e["type"],
-                        e["type_label"],
-                        e["frame_start"],
-                        e["frame_end"],
-                        e["timestamp_s"],
-                        e["duration_s"],
-                        e["severity"],
-                        e["severity_label"],
-                        e["actor_a_class"],
-                        e["actor_a_id"],
-                        e["actor_b_class"],
-                        e["actor_b_id"],
-                        e["min_gap_px"],
-                        e["min_ttc_s"],
-                        e["max_speed_px_s"],
-                        e["headline"],
-                        e["explanation"],
-                        json.dumps(e["factors"]),
-                    )
-                    for e in events
-                ],
-            )
+                        ev.get("type"),
+                        ev.get("type_label"),
+                        ev.get("frame_start"),
+                        ev.get("frame_end"),
+                        ev.get("timestamp_s"),
+                        ev.get("duration_s"),
+                        ev.get("severity"),
+                        ev.get("severity_label"),
+                        ev.get("actor_a_class"),
+                        ev.get("actor_a_id"),
+                        ev.get("actor_b_class"),
+                        ev.get("actor_b_id"),
+                        ev.get("min_gap_px"),
+                        ev.get("min_ttc_s"),
+                        ev.get("max_speed_px_s"),
+                        ev.get("headline"),
+                        ev.get("explanation"),
+                        json.dumps(ev.get("factors", [])),
+                    ),
+                )
             conn.commit()
         finally:
             conn.close()
 
 
-def fail_analysis(analysis_id: str, message: str) -> None:
+def fail_analysis(analysis_id: str, detail: str) -> None:
+    now = datetime.now(timezone.utc).isoformat()
     with _LOCK:
         conn = _connect()
         try:
             conn.execute(
-                "UPDATE analyses SET status='failed', stage='failed', detail=? WHERE id = ?",
-                (message, analysis_id),
+                """
+                UPDATE analyses
+                SET status = 'failed', stage = 'failed', detail = ?, completed_at = ?
+                WHERE id = ?
+                """,
+                (detail, now, analysis_id),
             )
             conn.commit()
         finally:
             conn.close()
 
 
-def _row_to_analysis(row: sqlite3.Row) -> dict:
-    d = dict(row)
-    d["summary"] = json.loads(d["summary"]) if d.get("summary") else None
-    d["detail"] = json.loads(d["detail"]) if d.get("detail") else None
-    return d
-
-
 def get_analysis(analysis_id: str) -> dict | None:
-    conn = _connect()
-    try:
-        row = conn.execute("SELECT * FROM analyses WHERE id = ?", (analysis_id,)).fetchone()
-        return _row_to_analysis(row) if row else None
-    finally:
-        conn.close()
+    with _LOCK:
+        conn = _connect()
+        try:
+            cur = conn.execute("SELECT * FROM analyses WHERE id = ?", (analysis_id,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            data = dict(row)
+            if data.get("summary"):
+                data["summary"] = json.loads(data["summary"])
+            if data.get("detail"):
+                try:
+                    data["detail"] = json.loads(data["detail"])
+                except Exception:
+                    pass
+            return data
+        finally:
+            conn.close()
 
 
-def list_analyses(limit: int = 20) -> list[dict]:
-    conn = _connect()
-    try:
-        rows = conn.execute(
-            "SELECT id, filename, source, status, progress, stage, risk_score,"
-            " risk_category, created_at, duration_s, frame_count FROM analyses"
-            " ORDER BY created_at DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
-        return [dict(r) for r in rows]
-    finally:
-        conn.close()
+def list_analyses() -> list[dict]:
+    with _LOCK:
+        conn = _connect()
+        try:
+            cur = conn.execute("SELECT * FROM analyses ORDER BY created_at DESC")
+            rows = cur.fetchall()
+            out = []
+            for r in rows:
+                d = dict(r)
+                if d.get("summary"):
+                    try:
+                        d["summary"] = json.loads(d["summary"])
+                    except Exception:
+                        pass
+                out.append(d)
+            return out
+        finally:
+            conn.close()
 
 
 def get_events(analysis_id: str) -> list[dict]:
-    conn = _connect()
-    try:
-        rows = conn.execute(
-            "SELECT * FROM events WHERE analysis_id = ? ORDER BY frame_start", (analysis_id,)
-        ).fetchall()
-        out = []
-        for r in rows:
-            d = dict(r)
-            d["factors"] = json.loads(d["factors"]) if d.get("factors") else []
-            out.append(d)
-        return out
-    finally:
-        conn.close()
+    with _LOCK:
+        conn = _connect()
+        try:
+            cur = conn.execute("SELECT * FROM events WHERE analysis_id = ? ORDER BY timestamp_s ASC", (analysis_id,))
+            rows = cur.fetchall()
+            out = []
+            for r in rows:
+                d = dict(r)
+                if d.get("factors"):
+                    try:
+                        d["factors"] = json.loads(d["factors"])
+                    except Exception:
+                        pass
+                out.append(d)
+            return out
+        finally:
+            conn.close()

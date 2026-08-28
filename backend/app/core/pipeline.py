@@ -5,12 +5,13 @@ track identity, models motion, runs the conflict engine, renders the
 annotated video with the final calculated Junction Risk Score, and
 completes with full forensic event provenance.
 
-Runs in its own thread (see services/worker.py) so FastAPI stays
+Runs in a worker thread pool (see services/worker.py) so FastAPI stays
 responsive while a clip is being processed.
 """
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -28,6 +29,8 @@ from app.core.risk import compute_risk
 from app.core.tracker import TrackContinuity
 from app.db.database import update_analysis_progress
 
+logger = logging.getLogger("the_junction.pipeline")
+
 
 @dataclass
 class PipelineResult:
@@ -43,9 +46,20 @@ class Pipeline:
 
     def run(self, video_path, out_path) -> PipelineResult:
         t0 = time.time()
+        logger.info(f"[{self.analysis_id}] Pipeline.run started for video: {video_path}")
+
         props = read_video_props(video_path)
         fps = props["fps"]
         w, h, total = props["width"], props["height"], props["frame_count"]
+        logger.info(f"[{self.analysis_id}] Video properties: {w}x{h} @ {fps:.1f} FPS, {total} frames")
+
+        update_analysis_progress(
+            self.analysis_id,
+            status="running",
+            stage="analysing",
+            progress=1,
+            extra={"current_frame": 0, "total_frames": total, "detections": 0, "events": 0},
+        )
 
         detector = get_detector()
         continuity = TrackContinuity()
@@ -59,16 +73,15 @@ class Pipeline:
         frame_tracks: dict[int, list[TrackedObject]] = {}
         frame_active: dict[int, list[dict]] = {}
 
-        update_analysis_progress(
-            self.analysis_id, stage="analysing", progress=0,
-            extra={"current_frame": 0, "total_frames": total},
-        )
+        logger.info(f"[{self.analysis_id}] Starting Pass 1: YOLO inference and ByteTrack tracking...")
 
         # -------------------------------------------------------------
         # PASS 1: Detection, Tracking, Motion, & Conflict Analysis
         # -------------------------------------------------------------
         results = detector.track_stream(str(video_path))
         frame_idx = 0
+        dets = []
+
         for result in results:
             dets = detector.detections_from_result(result)
             dets = [d for d in dets if d.track_id is not None]
@@ -110,11 +123,13 @@ class Pipeline:
             frame_active[frame_idx] = active
 
             frame_idx += 1
-            if frame_idx % 5 == 0 or frame_idx == total:
-                # Pass 1 covers 0% to 88% progress
-                pct = min(88, int(88 * frame_idx / max(total, 1)))
+            if frame_idx == 1 or frame_idx % 5 == 0 or frame_idx >= total:
+                pct = min(88, max(1, int(88 * frame_idx / max(total, 1))))
                 update_analysis_progress(
-                    self.analysis_id, stage="analysing", progress=pct,
+                    self.analysis_id,
+                    status="running",
+                    stage="analysing",
+                    progress=pct,
                     extra={
                         "current_frame": frame_idx,
                         "total_frames": total,
@@ -122,6 +137,8 @@ class Pipeline:
                         "events": len(engine.events),
                     },
                 )
+                if frame_idx % 50 == 0 or frame_idx == 1:
+                    logger.info(f"[{self.analysis_id}] Pass 1 progress: frame {frame_idx}/{total} ({pct}%) | events: {len(engine.events)}")
 
         events = engine.finish(last_frame=frame_idx)
         duration_s = total / fps
@@ -134,15 +151,20 @@ class Pipeline:
             "total_events": len(events),
         }
 
+        logger.info(f"[{self.analysis_id}] Pass 1 complete. Risk Score: {risk.score}/100 ({risk.category}). Starting Pass 2 (H.264 rendering)...")
+
         # -------------------------------------------------------------
         # PASS 2: Video Annotation & Encoding with Final Risk HUD
         # -------------------------------------------------------------
         update_analysis_progress(
-            self.analysis_id, stage="rendering", progress=90,
+            self.analysis_id,
+            status="running",
+            stage="rendering",
+            progress=90,
             extra={
                 "current_frame": frame_idx,
                 "total_frames": total,
-                "detections": len(dets),
+                "detections": 0,
                 "events": len(events),
                 "risk_score": risk.score,
             },
@@ -164,12 +186,25 @@ class Pipeline:
             writer.write(framed)
             render_idx += 1
 
-            if render_idx % 20 == 0:
+            if render_idx == 1 or render_idx % 20 == 0 or render_idx >= total:
                 pct = min(98, 90 + int(8 * render_idx / max(total, 1)))
-                update_analysis_progress(self.analysis_id, stage="rendering", progress=pct)
+                update_analysis_progress(
+                    self.analysis_id,
+                    status="running",
+                    stage="rendering",
+                    progress=pct,
+                    extra={
+                        "current_frame": render_idx,
+                        "total_frames": total,
+                        "detections": 0,
+                        "events": len(events),
+                        "risk_score": risk.score,
+                    },
+                )
 
         cap.release()
         writer.close()
+        logger.info(f"[{self.analysis_id}] Pass 2 complete. Video saved to {out_path}")
 
         summary = {
             "duration_s": round(duration_s, 2),
