@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     conf_threshold: float = 0.25
     iou_threshold: float = 0.45
     imgsz: int = 640
+    frame_stride: int = 3
     max_upload_mb: int = 200
 
     # Junction-relevant COCO classes: person, bicycle, car, motorcycle, bus, truck

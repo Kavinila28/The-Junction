@@ -12,6 +12,7 @@ responsive while a clip is being processed.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -51,7 +52,13 @@ class Pipeline:
         props = read_video_props(video_path)
         fps = props["fps"]
         w, h, total = props["width"], props["height"], props["frame_count"]
-        logger.info(f"[{self.analysis_id}] Video properties: {w}x{h} @ {fps:.1f} FPS, {total} frames")
+        stride = max(1, int(settings.frame_stride))
+        num_samples = math.ceil(total / stride)
+
+        logger.info(
+            f"[{self.analysis_id}] Video properties: {w}x{h} @ {fps:.1f} FPS, {total} frames | "
+            f"Frame stride: {stride} ({num_samples} frames to analyse)"
+        )
 
         update_analysis_progress(
             self.analysis_id,
@@ -73,23 +80,24 @@ class Pipeline:
         frame_tracks: dict[int, list[TrackedObject]] = {}
         frame_active: dict[int, list[dict]] = {}
 
-        logger.info(f"[{self.analysis_id}] Starting Pass 1: YOLO inference and ByteTrack tracking...")
+        logger.info(f"[{self.analysis_id}] Starting Pass 1: YOLO inference and ByteTrack tracking (stride={stride})...")
 
         # -------------------------------------------------------------
         # PASS 1: Detection, Tracking, Motion, & Conflict Analysis
         # -------------------------------------------------------------
-        results = detector.track_stream(str(video_path))
-        frame_idx = 0
+        results = detector.track_stream(str(video_path), vid_stride=stride)
+        k = 0
         dets = []
 
         for result in results:
+            actual_frame = min(k * stride, total - 1)
             dets = detector.detections_from_result(result)
             dets = [d for d in dets if d.track_id is not None]
-            dets = continuity.apply(frame_idx, dets)
+            dets = continuity.apply(actual_frame, dets)
 
             tracked: list[TrackedObject] = []
             for d in dets:
-                motion_obj = motion.update(frame_idx, d.track_id, d.box)
+                motion_obj = motion.update(actual_frame, d.track_id, d.box)
                 v = motion_obj.velocity_px()
                 speed_px_s = motion_obj.speed_px_per_second(fps)
                 tracked.append(
@@ -116,31 +124,34 @@ class Pipeline:
             speeds = [t.speed_px_s for t in tracked]
             v_p95 = float(np.percentile(speeds, 95)) if len(speeds) > 3 else 40.0
             active = engine.update(
-                frame_idx, tracked, {"v_p95_px_s": v_p95}
+                actual_frame, tracked, {"v_p95_px_s": v_p95}
             )
 
-            frame_tracks[frame_idx] = tracked
-            frame_active[frame_idx] = active
+            frame_tracks[actual_frame] = tracked
+            frame_active[actual_frame] = active
 
-            frame_idx += 1
-            if frame_idx == 1 or frame_idx % 5 == 0 or frame_idx >= total:
-                pct = min(88, max(1, int(88 * frame_idx / max(total, 1))))
+            k += 1
+            if k == 1 or k % 3 == 0 or k >= num_samples:
+                pct = min(88, max(1, int(88 * k / max(num_samples, 1))))
                 update_analysis_progress(
                     self.analysis_id,
                     status="running",
                     stage="analysing",
                     progress=pct,
                     extra={
-                        "current_frame": frame_idx,
+                        "current_frame": actual_frame,
                         "total_frames": total,
                         "detections": len(dets),
                         "events": len(engine.events),
                     },
                 )
-                if frame_idx % 50 == 0 or frame_idx == 1:
-                    logger.info(f"[{self.analysis_id}] Pass 1 progress: frame {frame_idx}/{total} ({pct}%) | events: {len(engine.events)}")
+                if k % 15 == 0 or k == 1 or k >= num_samples:
+                    logger.info(
+                        f"[{self.analysis_id}] Pass 1 progress: frame {actual_frame}/{total} "
+                        f"(sampled {k}/{num_samples} = {pct}%) | events: {len(engine.events)}"
+                    )
 
-        events = engine.finish(last_frame=frame_idx)
+        events = engine.finish(last_frame=total)
         duration_s = total / fps
         risk = compute_risk(events, duration_s)
 
@@ -151,7 +162,10 @@ class Pipeline:
             "total_events": len(events),
         }
 
-        logger.info(f"[{self.analysis_id}] Pass 1 complete. Risk Score: {risk.score}/100 ({risk.category}). Starting Pass 2 (H.264 rendering)...")
+        logger.info(
+            f"[{self.analysis_id}] Pass 1 complete in {time.time()-t0:.2f}s. "
+            f"Risk Score: {risk.score}/100 ({risk.category}). Starting Pass 2 (H.264 rendering)..."
+        )
 
         # -------------------------------------------------------------
         # PASS 2: Video Annotation & Encoding with Final Risk HUD
@@ -162,7 +176,7 @@ class Pipeline:
             stage="rendering",
             progress=90,
             extra={
-                "current_frame": frame_idx,
+                "current_frame": total,
                 "total_frames": total,
                 "detections": 0,
                 "events": len(events),
@@ -179,14 +193,16 @@ class Pipeline:
             ret, frame = cap.read()
             if not ret:
                 break
-            
-            tr = frame_tracks.get(render_idx, [])
-            act = frame_active.get(render_idx, [])
+
+            # Map to closest sampled track data for smooth rendering
+            sample_key = (render_idx // stride) * stride
+            tr = frame_tracks.get(sample_key, frame_tracks.get(render_idx, []))
+            act = frame_active.get(sample_key, frame_active.get(render_idx, []))
             framed = annotator.render(frame, tr, act, render_idx, final_hud)
             writer.write(framed)
             render_idx += 1
 
-            if render_idx == 1 or render_idx % 20 == 0 or render_idx >= total:
+            if render_idx == 1 or render_idx % 10 == 0 or render_idx >= total:
                 pct = min(98, 90 + int(8 * render_idx / max(total, 1)))
                 update_analysis_progress(
                     self.analysis_id,
@@ -204,7 +220,8 @@ class Pipeline:
 
         cap.release()
         writer.close()
-        logger.info(f"[{self.analysis_id}] Pass 2 complete. Video saved to {out_path}")
+        t_total = time.time() - t0
+        logger.info(f"[{self.analysis_id}] Pass 2 complete. Video saved to {out_path}. Total pipeline runtime: {t_total:.2f}s")
 
         summary = {
             "duration_s": round(duration_s, 2),
@@ -212,7 +229,8 @@ class Pipeline:
             "fps": fps,
             "width": w,
             "height": h,
-            "analysed_frames": frame_idx,
+            "analysed_frames": k,
+            "frame_stride": stride,
             "objects_tracked": len(objects_seen),
             "class_counts": class_counts,
             "max_concurrent": max_concurrent,
@@ -223,7 +241,7 @@ class Pipeline:
             "events_per_minute": risk.events_per_minute,
             "factors": risk.factors,
             "recommendations": risk.recommendations,
-            "processing_seconds": round(time.time() - t0, 2),
+            "processing_seconds": round(t_total, 2),
             "video_codec": writer.backend,
         }
 

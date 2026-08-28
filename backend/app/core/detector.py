@@ -64,12 +64,15 @@ class YOLODetector:
             dummy, imgsz=settings.imgsz, verbose=False, device="cpu"
         )
 
-    def track_stream(self, source: str, half: bool = False):
+    def track_stream(
+        self, source: str, half: bool = False, vid_stride: Optional[int] = None
+    ):
         """Yield an Ultralytics Results stream with ByteTrack tracking enabled.
 
         The tracker is stateful across yielded frames, producing stable
         track IDs in ``result.boxes.id``.
         """
+        stride = vid_stride if vid_stride is not None else settings.frame_stride
         return self._model.track(
             source=source,
             stream=True,
@@ -78,6 +81,7 @@ class YOLODetector:
             iou=settings.iou_threshold,
             classes=settings.junction_classes,
             tracker="bytetrack.yaml",
+            vid_stride=stride,
             persist=True,
             verbose=False,
             device="cpu",
