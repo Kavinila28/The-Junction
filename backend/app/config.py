@@ -30,7 +30,15 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8000
 
-    cors_origins: list[str] = ["*"]
+    cors_origins: list[str] = [
+        "https://the-junction-tawny.vercel.app",
+        "https://the-junction.onrender.com",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
+    cors_origin_regex: str = r"^https?:\/\/.*"
 
     upload_dir: Path = UPLOAD_DIR
     results_dir: Path = RESULTS_DIR
