@@ -1,86 +1,120 @@
-# THE JUNCTION
+# 🚦 THE JUNCTION
 
-> **"Predicting danger before it becomes an accident."**
+### AI-Powered Road Conflict Intelligence System
 
-An AI-powered road conflict intelligence system that analyses CCTV traffic footage to detect dangerous interactions, near-misses, and spatial proximity breaches before they result in collisions.
+> **Detect dangerous road interactions before they become accidents.**
+
+THE JUNCTION is an AI-powered road safety platform that analyses CCTV traffic footage to detect **near-misses, sudden braking, unsafe interactions, and vehicle–pedestrian conflicts** at road junctions.
+
+It uses computer vision and trajectory analysis to identify **emerging high-risk junctions before they become accident blackspots**.
+
+## 🔥 Key Features
+
+* 🎥 CCTV traffic video analysis
+* 🚗 Vehicle & pedestrian detection using **YOLOv8**
+* 🎯 Multi-object tracking using **ByteTrack**
+* ⚠️ Near-miss & conflict detection
+* ⏱️ Time-to-Collision (TTC) analysis
+* 🚶 Vehicle–pedestrian conflict detection
+* 📊 0–100 Junction Risk Score
+* 🎬 AI-annotated traffic video
+* 📈 Interactive traffic safety dashboard
+
+## 🧠 System Workflow
+
+```text
+CCTV Footage
+     ↓
+YOLOv8 Detection
+     ↓
+ByteTrack Tracking
+     ↓
+Trajectory & Velocity Analysis
+     ↓
+Conflict Detection
+     ↓
+Risk Scoring
+     ↓
+FastAPI Backend
+     ↓
+React Dashboard
+```
+
+## 🛠️ Tech Stack
+
+### AI / Computer Vision
+
+Python • PyTorch • YOLOv8 • ByteTrack • OpenCV • NumPy
+
+### Backend
+
+FastAPI • Uvicorn • Pydantic • SQLite
+
+### Frontend
+
+React • Vite • Tailwind CSS • Recharts
+
+### Deployment
+
+Vercel • Render
+
+## 🏗️ Architecture
+
+```text
+                CCTV Video
+                    │
+                    ▼
+          YOLOv8 + ByteTrack
+                    │
+                    ▼
+       Trajectory & Conflict Analysis
+                    │
+                    ▼
+            FastAPI Backend
+                    │
+                    ▼
+           React Dashboard
+                    │
+                    ▼
+          Junction Risk Score
+```
+
+## 🎯 Use Cases
+
+* 🚦 Identify emerging dangerous junctions
+* 🚶 Improve pedestrian safety
+* ⚠️ Detect recurring near-miss locations
+* 🏙️ Support smart-city road planning
+* 🛣️ Assist junction redesign and safety interventions
+
+## 🌐 Live Demo
+
+**Frontend:**
+https://the-junction-tawny.vercel.app/
+
+**Backend API:**
+https://the-junction-api.onrender.com/
+
+**API Documentation:**
+https://the-junction-api.onrender.com/docs
+
+## 🚀 Vision
+
+Traditional road safety asks:
+
+> **“Where did accidents happen?”**
+
+THE JUNCTION asks:
+
+> **“Where is dangerous behaviour happening before an accident happens?”**
+
+### From reactive accident analysis → proactive road-conflict intelligence.
 
 ---
 
-## 🚦 System Architecture
+### 👩‍💻 Author
 
-- **Computer Vision**: Ultralytics **YOLOv8n** pretrained on COCO for real-time traffic entity detection (`pedestrian`, `bicycle`, `car`, `motorcycle`, `bus`, `truck`).
-- **Tracking**: **ByteTrack** multi-object tracking for persistent object identities and smoothed velocity vectors.
-- **Conflict Engine**: Rule-based physics and temporal trajectory extrapolation for near-misses ($\text{TTC} \le 1.8\text{s}$), vehicle-pedestrian crossing exposures, path intersections, and sudden deceleration events.
-- **Risk Index**: Deterministic 0–100 Junction Risk Score categorized into `LOW`, `MODERATE`, `HIGH`, and `CRITICAL`.
-- **Annotation & Telemetry**: OpenCV & PyAV rendering motion trails, collision lines, hazard badges, and telemetry HUD with final computed risk scores into browser-streamable H.264 MP4.
-- **Backend**: FastAPI + SQLite + Uvicorn with HTTP 206 Partial Content video streaming.
-- **Frontend**: React 18 + Vite + Tailwind CSS + Recharts + Lucide React.
+**Kavinila Prabhakaran**
+Computer Science Engineering — Artificial Intelligence & Machine Learning
 
----
-
-## 🛠️ Quick Start
-
-### 1. Backend
-
-```bash
-cd backend
-python -m pip install -r requirements.txt
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
-
-### 2. Frontend
-
-```bash
-cd frontend
-npm.cmd install
-npm.cmd run dev
-```
-
-Dashboard is accessible at **`http://localhost:5173`**.
-
----
-
-## 🧪 Testing
-
-```bash
-cd backend
-python -m pytest tests
-```
-
-```bash
-cd frontend
-npm.cmd run build
-```
-Option 2: From Terminal (PowerShell / Command Prompt)
-Open two terminal windows:
-
-1. Backend Terminal (FastAPI)
-powershell
-
-
-cd C:\Users\pc\Documents\The-Junction\backend
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
-API URL: http://127.0.0.1:8000
-Interactive Swagger Docs: http://127.0.0.1:8000/docs
-Health Check: http://127.0.0.1:8000/api/health
-2. Frontend Terminal (Vite + React)
-powershell
-
-
-cd C:\Users\pc\Documents\The-Junction\frontend
-npm.cmd run dev
-Dashboard URL: http://localhost:5173
-If a Port is Already in Use (Kill Previous Instances)
-If port 8000 or 5173 is busy, stop previous processes:
-
-powershell
-
-
-# Stop any process listening on port 8000 (Backend)
-powershell -Command "Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }"
-# Stop any process listening on port 5173 (Frontend)
-powershell -Command "Get-NetTCPConnection -LocalPort 5173 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }"
-Both servers are currently active and running:
-
-Frontend Dashboard: http://localhost:5173
-Backend API: http://127.0.0.1:8000
+GitHub: https://github.com/Kavinila28
