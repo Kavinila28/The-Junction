@@ -4,8 +4,13 @@ Settings are loaded from environment variables and a local .env file
 (if present). No API keys are required anywhere in this project.
 """
 
+import os
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Disable Ultralytics runtime auto-installation of packages in production
+os.environ["YOLO_AUTOINSTALL"] = "False"
+os.environ["YOLO_VERBOSE"] = "False"
 
 # Project root: backend/
 BASE_DIR = Path(__file__).resolve().parent.parent

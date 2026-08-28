@@ -7,6 +7,7 @@ numpy<2.0
 opencv-python==4.10.0.84
 av>=13.1.0
 imageio-ffmpeg>=0.5.0
+lap>=0.5.12
 ultralytics>=8.3.0,<8.4.0
 torch==2.5.1
 torchvision==0.20.1

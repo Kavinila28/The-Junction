@@ -97,7 +97,12 @@ def create_demo():
 def _create_and_start(video_path: Path, filename: str, source: str) -> JSONResponse:
     analysis_id = create_analysis(filename, source, video_path)
     annotated_path = _result_dir(analysis_id) / "annotated.mp4"
-    update_analysis_progress(analysis_id, status="running", stage="analysing")
+    update_analysis_progress(
+        analysis_id,
+        status="running",
+        stage="analysing",
+        progress=0,
+    )
     start_analysis(analysis_id, video_path, annotated_path)
     return JSONResponse(
         {

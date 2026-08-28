@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+import os
 import threading
 import traceback
 
+from app.config import settings
 from app.core.pipeline import Pipeline
 from app.db.database import complete_analysis, fail_analysis, update_analysis_progress
 
@@ -27,25 +29,26 @@ def start_analysis(analysis_id: str, video_path, annotated_path) -> None:
     """Queue+run an analysis in the background."""
     with _LOCK:
         if analysis_id in _FUTURES and not _FUTURES[analysis_id].done():
-            logger.info(f"[{analysis_id}] Analysis already running.")
+            logger.info(f"[PID {os.getpid()}] [{analysis_id}] Analysis already active, skipping duplicate submit.")
             return
 
-        logger.info(f"[{analysis_id}] Submitting worker task for {video_path}")
+        logger.info(f"[PID {os.getpid()}] [{analysis_id}] Submitting worker task | DB: {settings.db_path} | Video: {video_path}")
         future = _EXECUTOR.submit(_run_worker, analysis_id, video_path, annotated_path)
         _FUTURES[analysis_id] = future
 
 
 def _run_worker(analysis_id: str, video_path, annotated_path) -> None:
-    logger.info(f"[{analysis_id}] Worker started. Processing: {video_path}")
+    pid = os.getpid()
+    db_path = str(settings.db_path)
+    logger.info(f"[PID {pid}] [{analysis_id}] Worker started | DB: {db_path} | Video: {video_path}")
     try:
-        update_analysis_progress(analysis_id, status="running", stage="analysing")
         pipeline = Pipeline(analysis_id)
         result = pipeline.run(video_path, annotated_path)
         complete_analysis(analysis_id, result.summary, annotated_path, result.events)
-        logger.info(f"[{analysis_id}] Pipeline completed successfully! Risk Score: {result.summary.get('risk_score')}")
+        logger.info(f"[PID {pid}] [{analysis_id}] Worker completed | DB: {db_path} | Risk Score: {result.summary.get('risk_score')}")
     except Exception as exc:
         err = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
-        logger.error(f"[{analysis_id}] Pipeline FAILED:\n{err}")
+        logger.error(f"[PID {pid}] [{analysis_id}] Worker failed | DB: {db_path} | Error:\n{err}")
         fail_analysis(analysis_id, err)
         update_analysis_progress(
             analysis_id,
